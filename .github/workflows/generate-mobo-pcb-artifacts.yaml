@@ -3,7 +3,7 @@ name: generate-mobo-pcb-artifacts
 on:
   push:
     paths:
-    - 'pnp/pcb/**.sch'
+    - 'pnp/pcb/**.kicad_sch'
     - 'pnp/pcb/**.kicad_pcb'
     - 'pnp/pcb/**.kibot.yaml'
     - '.github/workflows/generate-mobo-pcb-artifacts.yaml'
@@ -15,6 +15,8 @@ on:
     - 'pnp/pcb/**.kibot.yaml'
     - '.github/workflows/generate-mobo-pcb-artifacts.yaml'
     - '**.kibot.yaml'
+  release:
+    types: [ published ]
     
 env:
   repo: index-machines/index
@@ -23,7 +25,7 @@ env:
 jobs:
   generate-artifacts:
     runs-on: ubuntu-latest
-    container: setsoft/kicad_auto:latest
+    container: setsoft/kicad_auto:dev_k6
       
     steps:
     - name: Update system repositories, Install Required Libraries and Initialize git-lfs
@@ -43,7 +45,7 @@ jobs:
       id: extract_branch            
 
     - name: Update the PCBs with on default branch with git hash
-      if: steps.extract_branch.outputs.branch == env.main_branch
+      if: github.event_name == 'release' || steps.extract_branch.outputs.branch == env.main_branch
       run: |
         export COMMIT=$(git rev-parse --short HEAD)
         echo "COMMIT = ${COMMIT}"    
@@ -64,31 +66,43 @@ jobs:
       run: |
         cd pnp/pcb/mobo
         rm -rf export/
-        kibot -c ../../../config-4layer.kibot.yaml -e mobo.sch -b mobo.kicad_pcb -d export
+        kibot -c ../../../config-4layer.kibot.yaml -e mobo.kicad_sch -b mobo.kicad_pcb -d export
 
     # Splitting this out to ensure a failed kibot run will mark a check as failed.
     - name: Prepare pnp mobo Gerber Artifact
       run: |
         cd pnp/pcb/mobo/export/gerbers
-        zip -r -j ../pnp_mobo_gerbers.zip *        
+        zip -r -j ../pnp_mobo_gerbers.zip *
+        
+    - name: Prepare Output Artifact
+      if: github.event_name == 'release'    
+      run: |
+        cd pnp/pcb/mobo/export/
+        zip -r -j ../pnp_mobo_files.zip *
 
     - name: upload pnp artifacts
       uses: actions/upload-artifact@v2
       with:
         name: pnp_mobo_output
-        path: pnp/pcb/mobo/export        
+        path: pnp/pcb/mobo/export
 
     - name: Run ringLight KiBot
       run: |
         cd pnp/pcb/ringLight 
         rm -rf export/     
-        kibot -c ../../../config-2layer.kibot.yaml -e ringLight.sch -b ringLight.kicad_pcb -d export
+        kibot -c ../../../config-2layer.kibot.yaml -e ringLight.kicad_sch -b ringLight.kicad_pcb -d export
 
     # Splitting this out to ensure a failed kibot run will mark a check as failed.
     - name: Compress ringLight Gerbers for PCB Fab
       run: |
         cd pnp/pcb/ringLight/export/gerbers
         zip -r -j ../pnp_ringLight_gerbers.zip *
+        
+    - name: Prepare Output Artifact
+      if: github.event_name == 'release'    
+      run: |
+        cd pnp/pcb/ringLight/export/
+        zip -r -j ../pnp_ringLight_files.zip *
 
     - name: upload ringLight results
       uses: actions/upload-artifact@v2
@@ -96,3 +110,35 @@ jobs:
         name: pnp_ringLight_output
         path: pnp/pcb/ringLight/export
 
+    - name: Run datum KiBot
+      run: |
+        cd pnp/pcb/datum 
+        rm -rf export/     
+        kibot -c ../../../config-2layer.kibot.yaml -e datum.kicad_sch -b datum.kicad_pcb -d export
+
+    # Splitting this out to ensure a failed kibot run will mark a check as failed.
+    - name: Compress datum Gerbers for PCB Fab
+      run: |
+        cd pnp/pcb/datum/export/gerbers
+        zip -r -j ../pnp_datum_gerbers.zip *
+
+    - name: Prepare Output Artifact
+      if: github.event_name == 'release'    
+      run: |
+        cd pnp/pcb/datum/export/
+        zip -r -j ../pnp_datum_files.zip *
+
+    - name: upload datum results
+      uses: actions/upload-artifact@v2
+      with:
+        name: pnp_datum_output
+        path: pnp/pcb/datum/export
+
+    - name: Upload Artifacts to Release
+      uses: softprops/action-gh-release@v1
+      if: github.event_name == 'release'
+      with:
+        files: |
+          pnp/pcb/mobo/pnp_mobo_files.zip
+          pnp/pcb/ringLight/pnp_ringLight_files.zip  
+          pnp/pcb/datum/pnp_datum_files.zip       
